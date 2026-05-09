@@ -5,10 +5,10 @@ import time
 import re
 
 # 1. Настройка страницы
-st.set_page_config(page_title="Provenyx Lead Gen", layout="wide")
+st.set_page_config(page_title="Bulk Lead Gen AI", layout="wide")
 st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
-# ВОЗВРАЩЕННАЯ ИНСТРУКЦИЯ
+# ИНСТРУКЦИЯ
 st.markdown("""
 ### 📌 Инструкция:
 * **[PRODUCT_DETAILS]:** {Здесь описываешь текущий функционал, например: MCP data gateway, secure chatbot connectors for corporate data, etc.}
@@ -20,7 +20,7 @@ st.markdown("""
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("API ключ не найден в Secrets. Проверь настройки в Streamlit Cloud.")
+    st.error("API ключ не найден. Проверь Secrets.")
     st.stop()
 
 # 3. Поля ввода
@@ -33,23 +33,35 @@ with col2:
 uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    df_full = pd.read_csv(uploaded_file)
     
     st.write("### 👀 Превью загруженных данных:")
-    st.dataframe(df.head(5)) 
+    st.dataframe(df_full.head(3)) 
     
-    available_cols = df.columns.tolist()
-    
-    # Авто-подбор колонки с текстом
+    available_cols = df_full.columns.tolist()
     text_col_default = next((c for c in ['text', 'content', 'activityDescription'] if c in available_cols), available_cols[0])
     text_column = st.selectbox("Выбери колонку с текстом поста:", available_cols, index=available_cols.index(text_col_default))
     
-    # Колонки ссылок
     url_col = next((c for c in ['url', 'postUrl'] if c in available_cols), None)
     author_url_col = next((c for c in ['authorProfileUrl', 'authorUrl'] if c in available_cols), None)
 
-    if st.button("🚀 Начать анализ и скоринг"):
-        # Принудительно Flash для массовой обработки без ошибок 429
+    # --- НОВЫЙ БЛОК: НАРЕЗКА ФАЙЛА ---
+    st.markdown("---")
+    st.write(f"📊 **Всего строк в файле:** {len(df_full)}")
+    st.warning("⚡ *Streamlit может сбрасывать соединение при работе дольше 20 минут. Обрабатывай по 50-100 строк за раз!*")
+    
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        start_row = st.number_input("Начать со строки №", min_value=0, max_value=len(df_full)-1, value=0)
+    with col_s2:
+        end_row = st.number_input("Закончить на строке №", min_value=1, max_value=len(df_full), value=min(100, len(df_full)))
+
+    # Отрезаем нужный кусок для обработки
+    df = df_full.iloc[start_row:end_row].copy()
+    st.info(f"Будет обработано строк: **{len(df)}** (с {start_row} по {end_row-1})")
+    # ---------------------------------
+
+    if st.button("🚀 Начать анализ выбранных строк"):
         model = genai.GenerativeModel("gemini-1.5-flash")
             
         results = []
@@ -57,12 +69,12 @@ if uploaded_file is not None:
         
         progress_bar = st.progress(0)
         total = len(df)
-        
         quota_error = False
         
-        for index, row in df.iterrows():
+        # Используем enumerate для правильного заполнения прогресс-бара по срезу
+        for i, (index, row) in enumerate(df.iterrows()):
             if quota_error:
-                results.append("Пропущено: превышен лимит запросов")
+                results.append("Пропущено из-за лимитов")
                 scores.append(0)
                 continue
 
@@ -97,12 +109,10 @@ if uploaded_file is not None:
             """
             
             try:
-                # Пауза 4 секунды позволяет обходить лимиты RPM (запросов в минуту)
-                time.sleep(6.0) 
+                time.sleep(6.0) # Держим безопасные 10 RPM
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
-                # Вытаскиваем Score для колонки
                 score_match = re.search(r'Relevance Score:\s*(\d+)', output, re.IGNORECASE)
                 score_val = int(score_match.group(1)) if score_match else 0
                 
@@ -110,24 +120,21 @@ if uploaded_file is not None:
                 scores.append(score_val)
             except Exception as e:
                 if "429" in str(e):
-                    st.warning(f"🛑 Лимиты API исчерпаны. Остальные лиды пропущены.")
-                    results.append(f"Ошибка лимита (429).")
+                    st.warning("🛑 Лимиты исчерпаны. Сохраняем то, что успели.")
+                    results.append("Ошибка лимита (429).")
                     scores.append(0)
                     quota_error = True
                 else:
                     results.append(f"Ошибка API: {e}")
                     scores.append(0)
                 
-            progress_bar.progress((index + 1) / total)
+            progress_bar.progress((i + 1) / total)
             
-        # Добавляем данные в таблицу
         df['Score'] = scores
         df['AI_Analysis_and_Drafts'] = results
-        
-        # Сортировка: лучшие лиды в начале
         df = df.sort_values(by='Score', ascending=False)
         
-        st.success("✅ Анализ завершен!")
+        st.success(f"✅ Анализ партии ({start_row}-{end_row}) завершен!")
         
         st.subheader("🔥 Топ отобранных лидов")
         
@@ -136,9 +143,8 @@ if uploaded_file is not None:
                 p_url = row.get(url_col, "#") if url_col and pd.notna(row[url_col]) else "#"
                 a_url = row.get(author_url_col, "#") if author_url_col and pd.notna(row[author_url_col]) else "#"
 
-                with st.expander(f"Лид #{index+1} | Score: {row['Score']}/10"):
+                with st.expander(f"Лид (строка #{index}) | Score: {row['Score']}/10"):
                     st.markdown(f"🔗 [Открыть пост]({p_url}) | 👤 [Профиль автора]({a_url})")
-                    
                     c1, c2 = st.columns([1, 2])
                     with c1:
                         st.info("**Исходный текст:**")
@@ -147,6 +153,5 @@ if uploaded_file is not None:
                         st.success("**Анализ и Сообщения:**")
                         st.write(row['AI_Analysis_and_Drafts'])
 
-        # Финальный CSV со всеми колонками
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("💾 Скачать CSV с оценками", csv, "provenyx_leads_scored.csv", "text/csv")
+        st.download_button(f"💾 Скачать результат ({start_row}-{end_row})", csv, f"leads_{start_row}_{end_row}.csv", "text/csv")
