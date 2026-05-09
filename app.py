@@ -5,7 +5,7 @@ import time
 
 # Настройка страницы
 st.set_page_config(page_title="Bulk Lead Gen AI", layout="wide")
-st.title("Bulk B2B Lead Gen & CastDev Assistant")
+st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
 # Настройка API ключа
 if "GEMINI_API_KEY" in st.secrets:
