@@ -110,7 +110,7 @@ if uploaded_file is not None:
             """
             
             try:
-                time.sleep(6.0) # Держим безопасные 10 RPM
+                time.sleep(5.0) # Держим безопасные 10 RPM
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
