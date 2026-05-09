@@ -23,17 +23,6 @@ else:
     st.error("API ключ не найден. Проверь Secrets.")
     st.stop()
 
-# --- ВРЕМЕННЫЙ БЛОК ДЛЯ ПРОВЕРКИ МОДЕЛЕЙ ---
-st.write("### 🤖 Доступные модели для твоего ключа:")
-try:
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            st.code(m.name)
-except Exception as e:
-    st.error(f"Ошибка при запросе моделей: {e}")
-st.stop() # Останавливаем код здесь, чтобы не грузить остальной интерфейс
-# --------------------------------------------
-
 # 3. Поля ввода
 col1, col2 = st.columns(2)
 with col1:
