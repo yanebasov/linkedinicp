@@ -9,9 +9,9 @@ st.set_page_config(page_title="Provenyx Lead Gen", layout="wide")
 st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
 st.markdown("""
-### 📌 Правила:
-* **[PRODUCT_DETAILS]:** Описание Provenyx (например: *governance layer для корп. данных*).
-* **[TARGET_AUDIENCE]:** Твои ICP (например: *COO, Head of Marketing, CISO*).
+### 📌 Инструкция:
+* Используем модель **Gemini 1.5 Flash** для обхода лимитов.
+* Пауза между запросами — 4 секунды (безопасный режим).
 ---
 """)
 
@@ -34,10 +34,8 @@ uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     
-    # --- ВОТ ЭТОТ БЛОК МЫ ВЕРНУЛИ ---
     st.write("### 👀 Превью загруженных данных:")
     st.dataframe(df.head(5)) 
-    # --------------------------------
     
     available_cols = df.columns.tolist()
     
@@ -50,13 +48,8 @@ if uploaded_file is not None:
     author_url_col = next((c for c in ['authorProfileUrl', 'authorUrl'] if c in available_cols), None)
 
     if st.button("🚀 Начать анализ и скоринг"):
-        # Поиск актуальной модели (для твоего Gemini 3)
-        try:
-            available_models = [m.name for m in genai.list_models()]
-            model_id = next((m for m in available_models if "gemini-3" in m or "gemini-1.5-flash" in m), "gemini-1.5-flash")
-            model = genai.GenerativeModel(model_id)
-        except:
-            model = genai.GenerativeModel("gemini-1.5-flash")
+        # Принудительно Flash для стабильности при массовой обработке
+        model = genai.GenerativeModel("gemini-1.5-flash")
             
         results = []
         scores = []
@@ -64,7 +57,15 @@ if uploaded_file is not None:
         progress_bar = st.progress(0)
         total = len(df)
         
+        # Флаг для остановки при ошибке лимитов
+        quota_error = False
+        
         for index, row in df.iterrows():
+            if quota_error:
+                results.append("Пропущено: превышен лимит API")
+                scores.append(0)
+                continue
+
             lead_text = str(row[text_column])
             
             if pd.isna(row[text_column]) or lead_text.strip() in ["", "nan"]:
@@ -89,26 +90,33 @@ if uploaded_file is not None:
             """
             
             try:
-                time.sleep(1.5) # Пауза от лимитов
+                # Пауза 4 сек позволяет делать ~15 запросов в минуту (безопасно для Flash)
+                time.sleep(4.0) 
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
-                # Извлекаем Score для отдельной колонки
+                # Извлекаем Score
                 score_match = re.search(r'Relevance Score:\s*(\d+)', output, re.IGNORECASE)
                 score_val = int(score_match.group(1)) if score_match else 0
                 
                 results.append(output)
                 scores.append(score_val)
             except Exception as e:
-                results.append(f"Ошибка API: {e}")
-                scores.append(0)
+                if "429" in str(e):
+                    st.warning(f"🛑 Лимиты исчерпаны на лиде #{index+1}. Останавливаем запросы.")
+                    results.append(f"Ошибка лимита (429). Попробуйте позже.")
+                    scores.append(0)
+                    quota_error = True
+                else:
+                    results.append(f"Ошибка API: {e}")
+                    scores.append(0)
                 
             progress_bar.progress((index + 1) / total)
             
         df['Score'] = scores
         df['AI_Analysis_and_Drafts'] = results
         
-        # Сортировка по Score (лучшие сверху)
+        # Сортировка по Score
         df = df.sort_values(by='Score', ascending=False)
         
         st.success("✅ Анализ завершен!")
@@ -116,19 +124,20 @@ if uploaded_file is not None:
         st.subheader("🔥 Топ отобранных лидов")
         
         for index, row in df.iterrows():
-            p_url = row.get(url_col, "#") if url_col and pd.notna(row[url_col]) else "#"
-            a_url = row.get(author_url_col, "#") if author_url_col and pd.notna(row[author_url_col]) else "#"
+            if row['Score'] > 0: # Показываем только тех, кто прошел анализ
+                p_url = row.get(url_col, "#") if url_col and pd.notna(row[url_col]) else "#"
+                a_url = row.get(author_url_col, "#") if author_url_col and pd.notna(row[author_url_col]) else "#"
 
-            with st.expander(f"Лид #{index+1} | Score: {row['Score']}/10"):
-                st.markdown(f"🔗 [Открыть пост]({p_url}) | 👤 [Профиль автора]({a_url})")
-                
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    st.info("**Исходный текст:**")
-                    st.write(row[text_column])
-                with c2:
-                    st.success("**Анализ и Сообщения:**")
-                    st.write(row['AI_Analysis_and_Drafts'])
+                with st.expander(f"Лид #{index+1} | Score: {row['Score']}/10"):
+                    st.markdown(f"🔗 [Открыть пост]({p_url}) | 👤 [Профиль автора]({a_url})")
+                    
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        st.info("**Текст поста:**")
+                        st.write(row[text_column])
+                    with c2:
+                        st.success("**Анализ и Сообщения:**")
+                        st.write(row['AI_Analysis_and_Drafts'])
 
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("💾 Скачать CSV с оценками", csv, "leads_scored.csv", "text/csv")
+        st.download_button("💾 Скачать CSV с оценками", csv, "provenyx_scored_leads.csv", "text/csv")
