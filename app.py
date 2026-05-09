@@ -8,10 +8,11 @@ import re
 st.set_page_config(page_title="Provenyx Lead Gen", layout="wide")
 st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
+# ВОЗВРАЩЕННАЯ ИНСТРУКЦИЯ
 st.markdown("""
 ### 📌 Инструкция:
-* Используем модель **Gemini 1.5 Flash** для обхода лимитов.
-* Пауза между запросами — 4 секунды (безопасный режим).
+* **[PRODUCT_DETAILS]:** {Здесь описываешь текущий функционал, например: MCP data gateway, secure chatbot connectors for corporate data, etc.}
+* **[TARGET_AUDIENCE]:** {Кого ищем: CTO, CISO, Founders. ЕСЛИ ПУСТО ИЛИ НЕ ЗНАЕШЬ — напиши "Suggest ICP"}
 ---
 """)
 
@@ -25,9 +26,9 @@ else:
 # 3. Поля ввода
 col1, col2 = st.columns(2)
 with col1:
-    product_details = st.text_area("Product Details", "Provenyx: multi-LLM governance поверх BYOS (Drive/S3/Dropbox), гранулярные разрешения на уровне файлов.")
+    product_details = st.text_area("Product Details", "MCP data gateway, secure chatbot connectors for corporate data...")
 with col2:
-    target_audience = st.text_input("Target Audience", "COO, Head of Marketing, CCO, CISO")
+    target_audience = st.text_input("Target Audience", "Suggest ICP")
 
 uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 
@@ -48,7 +49,7 @@ if uploaded_file is not None:
     author_url_col = next((c for c in ['authorProfileUrl', 'authorUrl'] if c in available_cols), None)
 
     if st.button("🚀 Начать анализ и скоринг"):
-        # Принудительно Flash для стабильности при массовой обработке
+        # Принудительно Flash для массовой обработки без ошибок 429
         model = genai.GenerativeModel("gemini-1.5-flash")
             
         results = []
@@ -57,12 +58,11 @@ if uploaded_file is not None:
         progress_bar = st.progress(0)
         total = len(df)
         
-        # Флаг для остановки при ошибке лимитов
         quota_error = False
         
         for index, row in df.iterrows():
             if quota_error:
-                results.append("Пропущено: превышен лимит API")
+                results.append("Пропущено: превышен лимит запросов")
                 scores.append(0)
                 continue
 
@@ -74,28 +74,35 @@ if uploaded_file is not None:
                 continue
                 
             PROMPT = f"""
-            Act as an expert B2B Lead Gen Strategist. My name is Slava.
+            Act as an expert B2B Founder & Lead Gen Strategist doing Customer Discovery. My name is Slava. 
+
             [PRODUCT_DETAILS]: {product_details}
             [TARGET_AUDIENCE]: {target_audience}
-            Lead Post: "{lead_text}"
 
-            Step 1: Analysis (Russian)
-            - Relevance Score: [Scale 1-10. Format STRICTLY: "Relevance Score: X/10"]
-            - Hook: Why this lead?
+            Here is the text/post from the target lead:
+            "{lead_text}"
 
-            Step 2: Outreach (English)
-            - 1 Invite Note (<200 chars).
-            - 1 DM (Subject lowercase).
-            - 2 LinkedIn Comments (lowercase).
+            Step 1: Lead Analysis (in Russian)
+            - Relevance Score: [Оцени от 1 до 10. Формат СТРОГО: "Relevance Score: X/10"]
+            - The Technical Hook: What specific phrase or problem from their text we can use.
+
+            Step 2: Outreach Drafts (in English)
+            STRICT ANTI-AI STYLE RULES: Zero exclamation marks. Use periods. No corporate fluff. 
+            Sentences must be short, slightly informal. Goal: Customer Discovery.
+
+            Generate:
+            1. Invite Note (<200 chars).
+            2. Direct Message (Subject lowercase. 3-4 short sentences max).
+            3. 2 options for a LinkedIn Comment (All lowercase. NO fake enthusiasm).
             """
             
             try:
-                # Пауза 4 сек позволяет делать ~15 запросов в минуту (безопасно для Flash)
-                time.sleep(4.0) 
+                # Пауза 4 секунды позволяет обходить лимиты RPM (запросов в минуту)
+                time.sleep(6.0) 
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
-                # Извлекаем Score
+                # Вытаскиваем Score для колонки
                 score_match = re.search(r'Relevance Score:\s*(\d+)', output, re.IGNORECASE)
                 score_val = int(score_match.group(1)) if score_match else 0
                 
@@ -103,8 +110,8 @@ if uploaded_file is not None:
                 scores.append(score_val)
             except Exception as e:
                 if "429" in str(e):
-                    st.warning(f"🛑 Лимиты исчерпаны на лиде #{index+1}. Останавливаем запросы.")
-                    results.append(f"Ошибка лимита (429). Попробуйте позже.")
+                    st.warning(f"🛑 Лимиты API исчерпаны. Остальные лиды пропущены.")
+                    results.append(f"Ошибка лимита (429).")
                     scores.append(0)
                     quota_error = True
                 else:
@@ -113,10 +120,11 @@ if uploaded_file is not None:
                 
             progress_bar.progress((index + 1) / total)
             
+        # Добавляем данные в таблицу
         df['Score'] = scores
         df['AI_Analysis_and_Drafts'] = results
         
-        # Сортировка по Score
+        # Сортировка: лучшие лиды в начале
         df = df.sort_values(by='Score', ascending=False)
         
         st.success("✅ Анализ завершен!")
@@ -124,7 +132,7 @@ if uploaded_file is not None:
         st.subheader("🔥 Топ отобранных лидов")
         
         for index, row in df.iterrows():
-            if row['Score'] > 0: # Показываем только тех, кто прошел анализ
+            if row['Score'] > 0:
                 p_url = row.get(url_col, "#") if url_col and pd.notna(row[url_col]) else "#"
                 a_url = row.get(author_url_col, "#") if author_url_col and pd.notna(row[author_url_col]) else "#"
 
@@ -133,11 +141,12 @@ if uploaded_file is not None:
                     
                     c1, c2 = st.columns([1, 2])
                     with c1:
-                        st.info("**Текст поста:**")
+                        st.info("**Исходный текст:**")
                         st.write(row[text_column])
                     with c2:
                         st.success("**Анализ и Сообщения:**")
                         st.write(row['AI_Analysis_and_Drafts'])
 
+        # Финальный CSV со всеми колонками
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("💾 Скачать CSV с оценками", csv, "provenyx_scored_leads.csv", "text/csv")
+        st.download_button("💾 Скачать CSV с оценками", csv, "provenyx_leads_scored.csv", "text/csv")
