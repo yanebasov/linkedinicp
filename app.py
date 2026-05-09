@@ -96,6 +96,7 @@ if uploaded_file is not None:
 
             Step 1: Lead Analysis (in Russian)
             - Relevance Score: [Оцени от 1 до 10. Формат СТРОГО: "Relevance Score: X/10"]
+            - Обоснование оценки: [Детально распиши на 3-4 предложения, почему этот пост совпадает или не совпадает с ценностью продукта. Выдели совпадения по болям (Shadow AI, governance, security) и роли лида. Если оценка снижена — объясни почему].
             - The Technical Hook: What specific phrase or problem from their text we can use.
 
             Step 2: Outreach Drafts (in English)
@@ -104,7 +105,7 @@ if uploaded_file is not None:
 
             Generate:
             1. Invite Note (<200 chars).
-            2. Direct Message (Subject lowercase. 3-4 short sentences max).
+            2. InMail message (Subject. 3-4 short sentences max with invating for 40-50 min call).
             3. 2 options for a LinkedIn Comment (All lowercase. NO fake enthusiasm).
             """
             
