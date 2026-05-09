@@ -7,6 +7,14 @@ import time
 st.set_page_config(page_title="Bulk Lead Gen AI", layout="wide")
 st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
+# Добавляем блок с правилами и описанием
+st.markdown("""
+### 📌 Правила заполнения:
+* **[PRODUCT_DETAILS]:** Здесь описываешь текущий функционал, например: *MCP data gateway, secure chatbot connectors for corporate data, etc.*
+* **[TARGET_AUDIENCE]:** Кого ищем: *CTO, CISO, Founders*. ЕСЛИ ПУСТО ИЛИ НЕ ЗНАЕШЬ — напиши **"Suggest ICP"**
+---
+""")
+
 # Настройка API ключа
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
