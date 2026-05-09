@@ -43,7 +43,7 @@ if uploaded_file is not None:
     text_column = st.selectbox("Выбери колонку, в которой находится текст поста (обычно text или content):", df.columns)
     
     if st.button("🚀 Сгенерировать сообщения для всех лидов"):
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         results = []
         
         progress_text = "Обрабатываем лидов..."
