@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 import time
+import re
 
 # Настройка страницы
 st.set_page_config(page_title="Bulk Lead Gen AI", layout="wide")
@@ -30,7 +31,7 @@ with col2:
     target_audience = st.text_input("Target Audience", "Suggest ICP")
 
 # Загрузка таблицы
-uploaded_file = st.file_uploader("Загрузи таблицу с лидами (формат CSV)", type=["csv"])
+uploaded_file = st.file_uploader("Загрузи выгрузку постов из Apify (формат CSV)", type=["csv"])
 
 if uploaded_file is not None:
     # Читаем CSV
@@ -38,20 +39,17 @@ if uploaded_file is not None:
     st.write("Превью загруженных данных:")
     st.dataframe(df.head(3))
     
-    # Даем пользователю выбрать, в какой колонке находится текст для анализа
-    text_column = st.selectbox("Выбери колонку, в которой находится текст поста или описание профиля:", df.columns)
+    # Выбор колонки
+    text_column = st.selectbox("Выбери колонку, в которой находится текст поста (обычно text или content):", df.columns)
     
-    if st.button("Сгенерировать сообщения для всех лидов"):
+    if st.button("🚀 Сгенерировать сообщения для всех лидов"):
         model = genai.GenerativeModel('gemini-1.5-flash')
         results = []
         
-        # Индикатор прогресса
         progress_text = "Обрабатываем лидов..."
         my_bar = st.progress(0, text=progress_text)
-        
         total_rows = len(df)
         
-        # Проходим по каждой строке в таблице
         for index, row in df.iterrows():
             lead_text = str(row[text_column])
             
@@ -71,45 +69,65 @@ if uploaded_file is not None:
             "{lead_text}"
 
             Step 1: Lead Analysis (in Russian)
-            - Relevance Score (1-10) against the Target Audience.
+            - Relevance Score: [Оцени от 1 до 10. Формат СТРОГО: "Relevance Score: X/10"]
             - The Technical Hook: What specific phrase or problem from their text we can use.
 
             Step 2: Outreach Drafts (in English)
             STRICT ANTI-AI STYLE RULES:
             - Zero exclamation marks. Use periods.
-            - No corporate fluff, fake enthusiasm, or standard AI greetings ("I hope this finds you well", "Brilliant post", "I'd value your perspective").
+            - No corporate fluff, fake enthusiasm, or standard AI greetings.
             - Sentences must be short, slightly informal, like a founder typing quickly on a phone.
             - Goal: Customer Discovery. Ask for a "reality check" or "blunt feedback". DO NOT pitch. 
-            - Request a 10-15 minute chat (or fixed-rate call if they are existing clients).
+            - Request a 10-15 minute chat.
 
             Generate:
             1. Invite Note (under 200 chars).
             2. Direct Message (Subject line lowercase. 3-4 short sentences max).
-            3. 2 options for a LinkedIn Comment (All lowercase. NO fake enthusiasm. Just validate the pain point or ask a technical question).
+            3. 2 options for a LinkedIn Comment (All lowercase. NO fake enthusiasm. Just validate the pain point).
             """
             
             try:
-                # Пауза в 3 секунды, чтобы не упереться в лимиты бесплатного API Gemini
-                time.sleep(3)
+                time.sleep(3) # Пауза от лимитов
                 response = model.generate_content(PROMPT)
                 results.append(response.text)
             except Exception as e:
                 results.append(f"Ошибка API: {e}")
                 
-            # Обновляем прогресс-бар
             my_bar.progress((index + 1) / total_rows, text=f"Обработано {index + 1} из {total_rows}")
             
-        # Добавляем результаты в новую колонку
         df['AI_Analysis_and_Drafts'] = results
-        st.success("Анализ завершен!")
+        st.success("✅ Анализ завершен!")
         
-        # Показываем готовую таблицу
-        st.dataframe(df[[text_column, 'AI_Analysis_and_Drafts']])
+        # ВЫВОД КАРТОЧЕК ЛИДОВ НА ЭКРАН
+        st.subheader("🔥 Топ отобранных лидов")
         
-        # Кнопка для скачивания готового результата
+        for index, row in df.iterrows():
+            analysis_text = str(row.get('AI_Analysis_and_Drafts', ''))
+            post_text = str(row.get(text_column, ''))
+            
+            # Регулярное выражение для вытаскивания Score
+            score = "N/A"
+            match = re.search(r'Relevance Score:\s*(\d+)', analysis_text, re.IGNORECASE)
+            if match:
+                score = match.group(1)
+                
+            # Отрисовка раскрывающегося блока
+            with st.expander(f"Лид #{index+1} | Score: {score}/10"):
+                col_left, col_right = st.columns([1, 1.5]) # Левая колонка уже, правая шире
+                
+                with col_left:
+                    st.info("📝 **Исходный пост/текст:**")
+                    st.write(post_text)
+                    
+                with col_right:
+                    st.success("🤖 **Анализ и Драфты:**")
+                    st.write(analysis_text)
+        
+        # Кнопка для скачивания файла в самом низу
+        st.markdown("---")
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Скачать результат (CSV)",
+            label="💾 Скачать результат таблицей (CSV)",
             data=csv,
             file_name='processed_leads.csv',
             mime='text/csv',
