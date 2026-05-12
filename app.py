@@ -8,7 +8,6 @@ import re
 st.set_page_config(page_title="Bulk Lead Gen AI", layout="wide")
 st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
-# ИНСТРУКЦИЯ
 st.markdown("""
 ### 📌 Инструкция:
 * **[PRODUCT_DETAILS]:** {Здесь описываешь текущий функционал, например: MCP data gateway, secure chatbot connectors for corporate data, etc.}
@@ -20,10 +19,22 @@ st.markdown("""
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("API ключ не найден. Проверь Secrets.")
+    st.error("API ключ не найден в Secrets.")
     st.stop()
 
-# 3. Поля ввода
+# --- Инициализация памяти для авто-продолжения ---
+if 'is_processing' not in st.session_state:
+    st.session_state.is_processing = False
+if 'current_index' not in st.session_state:
+    st.session_state.current_index = 0
+if 'scores' not in st.session_state:
+    st.session_state.scores = []
+if 'results' not in st.session_state:
+    st.session_state.results = []
+if 'quota_error' not in st.session_state:
+    st.session_state.quota_error = False
+# ------------------------------------------------
+
 col1, col2 = st.columns(2)
 with col1:
     product_details = st.text_area("Product Details", "MCP data gateway, secure chatbot connectors for corporate data...")
@@ -34,9 +45,11 @@ uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 
 if uploaded_file is not None:
     df_full = pd.read_csv(uploaded_file)
+    total_rows = len(df_full)
     
-    st.write("### 👀 Превью загруженных данных:")
-    st.dataframe(df_full.head(3)) 
+    if not st.session_state.is_processing and st.session_state.current_index == 0:
+        st.write("### 👀 Превью загруженных данных:")
+        st.dataframe(df_full.head(3)) 
     
     available_cols = df_full.columns.tolist()
     text_col_default = next((c for c in ['text', 'content', 'activityDescription'] if c in available_cols), available_cols[0])
@@ -45,44 +58,40 @@ if uploaded_file is not None:
     url_col = next((c for c in ['url', 'postUrl'] if c in available_cols), None)
     author_url_col = next((c for c in ['authorProfileUrl', 'authorUrl'] if c in available_cols), None)
 
-    # --- НОВЫЙ БЛОК: НАРЕЗКА ФАЙЛА ---
     st.markdown("---")
-    st.write(f"📊 **Всего строк в файле:** {len(df_full)}")
-    st.warning("⚡ *Streamlit может сбрасывать соединение при работе дольше 20 минут. Обрабатывай по 50-100 строк за раз!*")
     
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        start_row = st.number_input("Начать со строки №", min_value=0, max_value=len(df_full)-1, value=0)
-    with col_s2:
-        end_row = st.number_input("Закончить на строке №", min_value=1, max_value=len(df_full), value=min(100, len(df_full)))
+    # Кнопка запуска
+    if not st.session_state.is_processing and st.session_state.current_index < total_rows:
+        if st.button(f"🚀 Запустить анализ всех {total_rows} лидов (Авто-режим)"):
+            st.session_state.is_processing = True
+            st.session_state.current_index = 0
+            st.session_state.scores = []
+            st.session_state.results = []
+            st.session_state.quota_error = False
+            st.rerun()
 
-    # Отрезаем нужный кусок для обработки
-    df = df_full.iloc[start_row:end_row].copy()
-    st.info(f"Будет обработано строк: **{len(df)}** (с {start_row} по {end_row-1})")
-    # ---------------------------------
-
-    if st.button("🚀 Начать анализ выбранных строк"):
+    # --- ЛОГИКА АВТО-ОБРАБОТКИ ---
+    if st.session_state.is_processing:
         model = genai.GenerativeModel("gemini-2.5-flash")
-            
-        results = []
-        scores = []
         
-        progress_bar = st.progress(0)
-        total = len(df)
-        quota_error = False
+        # Берем пачку 20 строк (около 2 минут работы, чтобы сервер не убил процесс)
+        batch_size = 20
+        start = st.session_state.current_index
+        end = min(start + batch_size, total_rows)
         
-        # Используем enumerate для правильного заполнения прогресс-бара по срезу
-        for i, (index, row) in enumerate(df.iterrows()):
-            if quota_error:
-                results.append("Пропущено из-за лимитов")
-                scores.append(0)
-                continue
-
+        st.info(f"🔄 Идет обработка: строки с {start} по {end} из {total_rows}... Пожалуйста, не закрывай вкладку.")
+        progress_bar = st.progress(start / total_rows)
+        
+        for i in range(start, end):
+            if st.session_state.quota_error:
+                break
+                
+            row = df_full.iloc[i]
             lead_text = str(row[text_column])
             
             if pd.isna(row[text_column]) or lead_text.strip() in ["", "nan"]:
-                results.append("Нет данных")
-                scores.append(0)
+                st.session_state.results.append("Нет данных")
+                st.session_state.scores.append(0)
                 continue
                 
             PROMPT = f"""
@@ -105,41 +114,57 @@ if uploaded_file is not None:
 
             Generate:
             1. Invite Note (<200 chars).
-            2. InMail message (Subject. 3-4 short sentences max with invating for 40-50 min call).
+            2. Direct Message (Subject lowercase. 3-4 short sentences max).
             3. 2 options for a LinkedIn Comment (All lowercase. NO fake enthusiasm).
             """
             
             try:
-                time.sleep(5.0) # Держим безопасные 10 RPM
+                time.sleep(6.0) # Железные 6 секунд паузы
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
                 score_match = re.search(r'Relevance Score:\s*(\d+)', output, re.IGNORECASE)
-                score_val = int(score_match.group(1)) if score_match else 0
-                
-                results.append(output)
-                scores.append(score_val)
+                st.session_state.scores.append(int(score_match.group(1)) if score_match else 0)
+                st.session_state.results.append(output)
             except Exception as e:
                 if "429" in str(e):
-                    st.warning("🛑 Лимиты исчерпаны. Сохраняем то, что успели.")
-                    results.append("Ошибка лимита (429).")
-                    scores.append(0)
-                    quota_error = True
+                    st.session_state.quota_error = True
+                    st.session_state.results.append("Ошибка лимита (429).")
+                    st.session_state.scores.append(0)
                 else:
-                    results.append(f"Ошибка API: {e}")
-                    scores.append(0)
-                
-            progress_bar.progress((i + 1) / total)
+                    st.session_state.results.append(f"Ошибка API: {e}")
+                    st.session_state.scores.append(0)
             
-        df['Score'] = scores
-        df['AI_Analysis_and_Drafts'] = results
-        df = df.sort_values(by='Score', ascending=False)
+            progress_bar.progress((i + 1) / total_rows)
         
-        st.success(f"✅ Анализ партии ({start_row}-{end_row}) завершен!")
+        # Обновляем индекс после пачки
+        st.session_state.current_index = end
+        
+        if st.session_state.quota_error or st.session_state.current_index >= total_rows:
+            st.session_state.is_processing = False
+            st.rerun() # Финальная перезагрузка для вывода результатов
+        else:
+            time.sleep(2)
+            st.rerun() # Перезагрузка для следующей пачки (спасает от таймаута)
+
+    # --- ВЫВОД РЕЗУЛЬТАТОВ ---
+    if not st.session_state.is_processing and len(st.session_state.results) > 0:
+        
+        if st.session_state.quota_error:
+            st.warning("🛑 Анализ остановлен из-за лимитов Google, но обработанные данные сохранены!")
+        else:
+            st.success("✅ Весь файл успешно обработан!")
+            
+        # Добавляем результаты только к обработанным строкам
+        processed_count = len(st.session_state.results)
+        df_result = df_full.iloc[:processed_count].copy()
+        df_result['Score'] = st.session_state.scores
+        df_result['AI_Analysis_and_Drafts'] = st.session_state.results
+        
+        df_result = df_result.sort_values(by='Score', ascending=False)
         
         st.subheader("🔥 Топ отобранных лидов")
-        
-        for index, row in df.iterrows():
+        for index, row in df_result.iterrows():
             if row['Score'] > 0:
                 p_url = row.get(url_col, "#") if url_col and pd.notna(row[url_col]) else "#"
                 a_url = row.get(author_url_col, "#") if author_url_col and pd.notna(row[author_url_col]) else "#"
@@ -148,11 +173,15 @@ if uploaded_file is not None:
                     st.markdown(f"🔗 [Открыть пост]({p_url}) | 👤 [Профиль автора]({a_url})")
                     c1, c2 = st.columns([1, 2])
                     with c1:
-                        st.info("**Исходный текст:**")
                         st.write(row[text_column])
                     with c2:
-                        st.success("**Анализ и Сообщения:**")
                         st.write(row['AI_Analysis_and_Drafts'])
 
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(f"💾 Скачать результат ({start_row}-{end_row})", csv, f"leads_{start_row}_{end_row}.csv", "text/csv")
+        csv = df_result.to_csv(index=False).encode('utf-8')
+        st.download_button("💾 Скачать готовый CSV", csv, "leads_fully_scored.csv", "text/csv")
+        
+        if st.button("🔄 Сбросить и начать заново"):
+            st.session_state.current_index = 0
+            st.session_state.results = []
+            st.session_state.scores = []
+            st.rerun()
