@@ -74,7 +74,7 @@ if uploaded_file is not None:
     if st.session_state.is_processing:
         model = genai.GenerativeModel("gemini-2.5-flash")
         
-        # Берем пачку 20 строк (около 2 минут работы, чтобы сервер не убил процесс)
+        # Берем пачку 20 строк
         batch_size = 20
         start = st.session_state.current_index
         end = min(start + batch_size, total_rows)
@@ -119,7 +119,7 @@ if uploaded_file is not None:
             """
             
             try:
-                time.sleep(4.0) # Железные 6 секунд паузы
+                time.sleep(4.0) # Пауза 4 секунды (15 RPM)
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
@@ -145,7 +145,7 @@ if uploaded_file is not None:
             st.rerun() # Финальная перезагрузка для вывода результатов
         else:
             time.sleep(2)
-            st.rerun() # Перезагрузка для следующей пачки (спасает от таймаута)
+            st.rerun() # Перезагрузка для следующей пачки
 
     # --- ВЫВОД РЕЗУЛЬТАТОВ ---
     if not st.session_state.is_processing and len(st.session_state.results) > 0:
@@ -155,13 +155,15 @@ if uploaded_file is not None:
         else:
             st.success("✅ Весь файл успешно обработан!")
             
-        # Добавляем результаты только к обработанным строкам
-        processed_count = len(st.session_state.results)
-        df_result = df_full.iloc[:processed_count].copy()
-        df_result['Score'] = st.session_state.scores
-        df_result['AI_Analysis_and_Drafts'] = st.session_state.results
+        # --- ЖЕСТКАЯ ЗАЩИТА ОТ ОШИБОК ДЛИНЫ МАССИВОВ ---
+        min_len = min(len(st.session_state.results), len(st.session_state.scores), len(df_full))
+        
+        df_result = df_full.iloc[:min_len].copy()
+        df_result['Score'] = st.session_state.scores[:min_len]
+        df_result['AI_Analysis_and_Drafts'] = st.session_state.results[:min_len]
         
         df_result = df_result.sort_values(by='Score', ascending=False)
+        # -----------------------------------------------
         
         st.subheader("🔥 Топ отобранных лидов")
         for index, row in df_result.iterrows():
