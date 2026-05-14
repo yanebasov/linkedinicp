@@ -39,7 +39,7 @@ col1, col2 = st.columns(2)
 with col1:
     product_details = st.text_area("Product Details", "MCP data gateway, secure chatbot connectors for corporate data...")
 with col2:
-    target_audience = st.text_input("Target Audience", "Suggest ICP")
+    target_audience = st.text_area("Target Audience", "Suggest ICP")
 
 uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 
