@@ -105,7 +105,7 @@ if uploaded_file is not None:
 
             Step 1: Lead Analysis (in Russian)
             - Relevance Score: [Оцени от 1 до 10. Формат СТРОГО: "Relevance Score: X/10"]
-            - Обоснование оценки: [Детально распиши на 3-4 предложения, почему этот пост совпадает или не совпадает с ценностью продукта. Выдели совпадения по болям (Shadow AI, governance, security) и роли лида. Если оценка снижена — объясни почему].
+            - Обоснование оценки: [Детально распиши на 3-4 предложения. Ищи совпадения по болям: ручной сбор контекста для AI, copy-paste данных из Drive/Slack/транскриптов, потеря tribal knowledge, разрозненные знания по разным клиентам. Строго СНИЖАЙ оценку, если речь идет про жесткий compliance, pharma/healthcare, или если лид — CISO/безопасник].
             - The Technical Hook: What specific phrase or problem from their text we can use.
 
             Step 2: Outreach Drafts (in English)
@@ -119,7 +119,7 @@ if uploaded_file is not None:
             """
             
             try:
-                time.sleep(6.0) # Пауза 4 секунды (15 RPM)
+                time.sleep(5.0) # Пауза 4 секунды (15 RPM)
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
