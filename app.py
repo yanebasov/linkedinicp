@@ -10,8 +10,8 @@ st.title("Bulk B2B Lead Gen & CustDev Assistant")
 
 st.markdown("""
 ### 📌 Инструкция:
-* **[PRODUCT_DETAILS]:** {Здесь описываешь текущий функционал, например: MCP data gateway, secure chatbot connectors for corporate data, etc.}
-* **[TARGET_AUDIENCE]:** {Кого ищем: CTO, CISO, Founders. ЕСЛИ ПУСТО ИЛИ НЕ ЗНАЕШЬ — напиши "Suggest ICP"}
+* **[PRODUCT_DETAILS]:** Описание продукта (Provenyx = AI search hub...)
+* **[TARGET_AUDIENCE]:** Кого ищем (CDO, Head of Ops, Agency 30-200 чел...)
 ---
 """)
 
@@ -37,9 +37,10 @@ if 'quota_error' not in st.session_state:
 
 col1, col2 = st.columns(2)
 with col1:
-    product_details = st.text_area("Product Details", "MCP data gateway, secure chatbot connectors for corporate data...")
+    product_details = st.text_area("Product Details", "Provenyx = AI search hub для корпоративных знаний...")
 with col2:
-    target_audience = st.text_area("Target Audience", "Suggest ICP")
+    # Заменили text_input на text_area для симметрии
+    target_audience = st.text_area("Target Audience", "CDO, Head of Operations, COO... Компании: Marketing, digital, creative агентства...")
 
 uploaded_file = st.file_uploader("Загрузи CSV из Apify", type=["csv"])
 
@@ -62,7 +63,7 @@ if uploaded_file is not None:
     
     # Кнопка запуска
     if not st.session_state.is_processing and st.session_state.current_index < total_rows:
-        if st.button(f"🚀 Запустить анализ всех {total_rows} лидов (Авто-режим)"):
+        if st.button(f"🚀 Запустить анализ {total_rows} лидов (Авто-режим)"):
             st.session_state.is_processing = True
             st.session_state.current_index = 0
             st.session_state.scores = []
@@ -74,7 +75,6 @@ if uploaded_file is not None:
     if st.session_state.is_processing:
         model = genai.GenerativeModel("gemini-2.5-flash")
         
-        # Берем пачку 20 строк
         batch_size = 20
         start = st.session_state.current_index
         end = min(start + batch_size, total_rows)
@@ -88,6 +88,10 @@ if uploaded_file is not None:
                 
             row = df_full.iloc[i]
             lead_text = str(row[text_column])
+            
+            # --- Ищем колонку с заголовком автора ---
+            headline_col = next((c for c in ['authorHeadline', 'headline', 'authorTitle'] if c in available_cols), None)
+            author_headline = str(row[headline_col]) if headline_col and pd.notna(row[headline_col]) else "Unknown"
             
             if pd.isna(row[text_column]) or lead_text.strip() in ["", "nan"]:
                 st.session_state.results.append("Нет данных")
@@ -103,9 +107,31 @@ if uploaded_file is not None:
             Here is the text/post from the target lead:
             "{lead_text}"
 
+            Author headline: "{author_headline}"
+
+            ---
+
+            PRE-FILTER STEP (run this before anything else, output result only if excluded):
+
+            1. COMPANY PAGE FILTER: If the author_headline matches the pattern of ONLY a follower count
+            (e.g. "14,460 followers", "598 followers", "0 followers") — meaning it contains nothing
+            but a number and the word "followers" — respond with exactly:
+            EXCLUDED: Company page. Stop here. Do not continue.
+
+            2. LANGUAGE FILTER: Detect the primary language of the lead_text.
+            If it is NOT written in English, respond with exactly:
+            EXCLUDED: Non-English post ([detected language]). Stop here. Do not continue.
+
+            ---
+
+            If the post passes both filters, continue:
+
             Step 1: Lead Analysis (in Russian)
             - Relevance Score: [Оцени от 1 до 10. Формат СТРОГО: "Relevance Score: X/10"]
-            - Обоснование оценки: [Детально распиши на 3-4 предложения. Ищи совпадения по болям: ручной сбор контекста для AI, copy-paste данных из Drive/Slack/транскриптов, потеря tribal knowledge, разрозненные знания по разным клиентам. Строго СНИЖАЙ оценку, если речь идет про жесткий compliance, pharma/healthcare, или если лид — CISO/безопасник].
+            - Обоснование оценки: [Детально распиши на 3-4 предложения. Ищи совпадения по болям:
+              ручной сбор контекста для AI, copy-paste данных из Drive/Slack/транскриптов, потеря
+              tribal knowledge, разрозненные знания по разным клиентам. Строго СНИЖАЙ оценку, если
+              речь идет про жесткий compliance, pharma/healthcare, или если лид — CISO/безопасник].
             - The Technical Hook: What specific phrase or problem from their text we can use.
 
             Step 2: Outreach Drafts (in English)
@@ -119,10 +145,11 @@ if uploaded_file is not None:
             """
             
             try:
-                time.sleep(5.0) # Пауза 4 секунды (15 RPM)
+                time.sleep(6.0) # Задержка в 6 секунд
                 response = model.generate_content(PROMPT)
                 output = response.text
                 
+                # Ищем оценку, если не нашли (или если сработал фильтр EXCLUDED), ставим 0
                 score_match = re.search(r'Relevance Score:\s*(\d+)', output, re.IGNORECASE)
                 st.session_state.scores.append(int(score_match.group(1)) if score_match else 0)
                 st.session_state.results.append(output)
@@ -151,11 +178,11 @@ if uploaded_file is not None:
     if not st.session_state.is_processing and len(st.session_state.results) > 0:
         
         if st.session_state.quota_error:
-            st.warning("🛑 Анализ остановлен из-за лимитов Google, но обработанные данные сохранены!")
+            st.warning("🛑 Анализ остановлен из-за лимитов Google, но данные сохранены!")
         else:
             st.success("✅ Весь файл успешно обработан!")
             
-        # --- ЖЕСТКАЯ ЗАЩИТА ОТ ОШИБОК ДЛИНЫ МАССИВОВ ---
+        # Жесткая защита от ошибок длин массивов
         min_len = min(len(st.session_state.results), len(st.session_state.scores), len(df_full))
         
         df_result = df_full.iloc[:min_len].copy()
@@ -163,7 +190,6 @@ if uploaded_file is not None:
         df_result['AI_Analysis_and_Drafts'] = st.session_state.results[:min_len]
         
         df_result = df_result.sort_values(by='Score', ascending=False)
-        # -----------------------------------------------
         
         st.subheader("🔥 Топ отобранных лидов")
         for index, row in df_result.iterrows():
